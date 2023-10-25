@@ -19,6 +19,9 @@ import {
 import jsesc from "jsesc";
 import pick from "lodash/pick";
 import colors from "picocolors";
+import { createPagesFunctionHandler } from "@remix-run/cloudflare-pages";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { splitCookiesString } from "set-cookie-parser";
 
 import { type RouteManifest } from "../config/routes";
 import {
@@ -33,6 +36,8 @@ import * as VirtualModule from "./vmod";
 import { removeExports } from "./remove-exports";
 import { transformLegacyCssImports } from "./legacy-css-imports";
 import { replaceImportSpecifier } from "./replace-import-specifier";
+import type { DevBindingsOptions} from "./cloudflare";
+import { getCloudflareDevBindings } from "./cloudflare";
 
 const supportedRemixConfigKeys = [
   "appDirectory",
@@ -50,6 +55,8 @@ export type RemixVitePluginOptions = Pick<
   SupportedRemixConfigKey
 > & {
   legacyCssImports?: boolean;
+} & {
+  cloudflare?: { pages?: true, devBindings?: DevBindingsOptions };
 };
 
 type ResolvedRemixVitePluginConfig = Pick<
@@ -65,7 +72,7 @@ type ResolvedRemixVitePluginConfig = Pick<
   | "routes"
   | "serverBuildPath"
   | "serverModuleFormat"
->;
+> & { cloudflare?: { pages?: true, devBindings?: DevBindingsOptions } };
 
 let serverEntryId = VirtualModule.id("server-entry");
 let serverManifestId = VirtualModule.id("server-manifest");
@@ -219,7 +226,7 @@ export const remixVitePlugin: RemixVitePlugin = (options = {}) => {
         viteUserConfig.root ?? process.env.REMIX_ROOT ?? process.cwd();
 
       // Avoid leaking any config options that the Vite plugin doesn't support
-      let config = pick(options, supportedRemixConfigKeys);
+      let config = pick(options, [...supportedRemixConfigKeys, "cloudflare"]);
 
       // Only select the Remix config options that the Vite plugin uses
       let {
@@ -246,6 +253,7 @@ export const remixVitePlugin: RemixVitePlugin = (options = {}) => {
         serverModuleFormat,
         relativeAssetsBuildDirectory,
         future: {},
+        cloudflare: options.cloudflare,
       };
     };
 
@@ -392,6 +400,80 @@ export const remixVitePlugin: RemixVitePlugin = (options = {}) => {
     };
   };
 
+  let cloudflareBindings: Record<string, unknown> = {};
+
+  let getNodeHandle = async (build: ServerBuild, vite: ViteDevServer, pluginConfig: ResolvedRemixVitePluginConfig, url: string|undefined) => {
+    return createRequestHandler(build, {
+      mode: "development",
+      criticalCss: await getStylesForUrl(
+        vite,
+        pluginConfig,
+        cssModulesManifest,
+        build,
+        url
+      ),
+    });
+  }
+
+  let getCloudflarePagesHandle = (build: ServerBuild) => {
+    let cloudflarePagesOriginalHandler = createPagesFunctionHandler({
+      build,
+      mode: "development",
+      getLoadContext: () => {
+        return {
+          request: {},
+          env: cloudflareBindings
+        };
+      },
+    });
+    let handle = async (req: IncomingMessage, res: ServerResponse) => {
+      let path = req.url ?? "/";
+      let cfRes = await cloudflarePagesOriginalHandler({
+        request: new Request(new URL(`http://localhost${path}`), {
+          ...(req as Object),
+          headers: new Headers([...Object.entries(req.headers)] as [
+            string,
+            string
+          ][]),
+        } as RequestInit),
+      });
+      res.statusCode = cfRes!.status;
+      res.statusMessage = cfRes!.statusText;
+
+      for (let [name, value] of cfRes!.headers) {
+        if (name === "set-cookie") {
+          res.setHeader(name, splitCookiesString(value));
+        } else res.setHeader(name, value);
+      }
+
+      if (cfRes!.body) {
+        let reader = cfRes?.body.getReader();
+        let chunk = await reader?.read();
+        while (chunk?.value) {
+          res.write(chunk.value);
+          chunk = await reader?.read();
+        }
+      }
+
+      res.end();
+    };
+    return handle;
+  }
+
+  let getHandler = async (vite: ViteDevServer, req: IncomingMessage) => {
+    let { url } = req;
+    let [pluginConfig, build] = await Promise.all([
+      resolvePluginConfig(),
+      vite.ssrLoadModule(serverEntryId) as Promise<ServerBuild>,
+    ]);
+
+    if (pluginConfig.cloudflare?.pages) {
+      return getCloudflarePagesHandle(build);
+    } else {
+      return getNodeHandle(build, vite, pluginConfig, url);
+    }
+  }
+
   return [
     {
       name: "remix",
@@ -498,6 +580,12 @@ export const remixVitePlugin: RemixVitePlugin = (options = {}) => {
           viteConfig.build.ssr && viteCommand === "build"
             ? { isSsrBuild: true, getManifest: createBuildManifest }
             : { isSsrBuild: false };
+
+        let pluginConfig = await resolvePluginConfig();
+        if(pluginConfig.cloudflare?.pages) {
+          let bindingsOptions = pluginConfig.cloudflare.devBindings ?? {};
+          cloudflareBindings = await getCloudflareDevBindings(bindingsOptions);
+        }
       },
       transform(code, id) {
         if (isCssModulesFile(id)) {
@@ -527,23 +615,7 @@ export const remixVitePlugin: RemixVitePlugin = (options = {}) => {
                 }
               });
 
-              let { url } = req;
-              let [pluginConfig, build] = await Promise.all([
-                resolvePluginConfig(),
-                vite.ssrLoadModule(serverEntryId) as Promise<ServerBuild>,
-              ]);
-
-              let handle = createRequestHandler(build, {
-                mode: "development",
-                criticalCss: await getStylesForUrl(
-                  vite,
-                  pluginConfig,
-                  cssModulesManifest,
-                  build,
-                  url
-                ),
-              });
-
+              let handle = await getHandler(vite, req);
               await handle(req, res);
             } catch (error) {
               next(error);
