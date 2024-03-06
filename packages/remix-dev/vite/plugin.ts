@@ -1264,7 +1264,12 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           }
         });
 
-        return () => {
+        return async () => {
+          let cloudflarePlugin = viteDevServer.config.plugins.find(
+            (p) => p.name === "vite-plugin-remix-cloudflare-proxy"
+          ) as unknown as undefined | { ready: Promise<void> };
+          await cloudflarePlugin?.ready;
+
           // Let user servers handle SSR requests in middleware mode,
           // otherwise the Vite plugin will handle the request
           if (!viteDevServer.config.server.middlewareMode) {
