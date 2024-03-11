@@ -1,7 +1,7 @@
 import { type Plugin } from "vite";
-import { join } from "path";
+// import { join } from "path";
 
-import { fromNodeRequest, toNodeRequest } from "./node-adapter";
+// import { fromNodeRequest, toNodeRequest } from "./node-adapter";
 
 const NAME = "vite-plugin-remix-cloudflare-proxy";
 
@@ -32,25 +32,25 @@ export const cloudflareDevProxyVitePlugin = (): Plugin => {
     },
     configureServer: async (viteDevServer) => {
       return async () => {
-        let ssrRuntime = await (viteDevServer.ssrRuntime$);
+        // let ssrRuntime = await (viteDevServer.ssrRuntime$);
 
-        let requestDispatcher = await ssrRuntime.createRequestDispatcher({
-          entrypoint: join(__dirname, 'static', 'cloudflare-dev-entrypoint.ts'),
-        });
+        // let requestDispatcher = await ssrRuntime.createRequestDispatcher({
+        //   entrypoint: join(__dirname, 'static', 'cloudflare-dev-entrypoint.ts'),
+        // });
 
         readyResolve();
 
-        if (!viteDevServer.config.server.middlewareMode) {
-          viteDevServer.middlewares.use(async (nodeReq, nodeRes, next) => {
-            try {
-              let req = fromNodeRequest(nodeReq);
-              let res = await requestDispatcher(req);
-              await toNodeRequest(res, nodeRes);
-            } catch (error) {
-              next(error);
-            }
-          });
-        }
+        // if (!viteDevServer.config.server.middlewareMode) {
+        //   viteDevServer.middlewares.use(async (nodeReq, nodeRes, next) => {
+        //     try {
+        //       let req = fromNodeRequest(nodeReq);
+        //       let res = await requestDispatcher(req);
+        //       await toNodeRequest(res, nodeRes);
+        //     } catch (error) {
+        //       next(error);
+        //     }
+        //   });
+        // }
       };
     },
   };

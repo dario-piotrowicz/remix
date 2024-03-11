@@ -7,9 +7,9 @@ import * as url from "node:url";
 import * as fse from "fs-extra";
 import babel from "@babel/core";
 import {
-  type ServerBuild,
+  // type ServerBuild,
   unstable_setDevServerHooks as setDevServerHooks,
-  createRequestHandler,
+  // createRequestHandler,
 } from "@remix-run/server-runtime";
 import {
   init as initEsModuleLexer,
@@ -29,7 +29,7 @@ import {
 import { type Manifest as RemixManifest } from "../manifest";
 import invariant from "../invariant";
 import {
-  type NodeRequestHandler,
+  // type NodeRequestHandler,
   fromNodeRequest,
   toNodeRequest,
 } from "./node-adapter";
@@ -499,6 +499,7 @@ let mergeRemixConfig = (...configs: VitePluginConfig[]): VitePluginConfig => {
 
 type MaybePromise<T> = T | Promise<T>;
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 let remixDevLoadContext: (
   request: Request
 ) => MaybePromise<Record<string, unknown>> = () => ({});
@@ -1273,22 +1274,21 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           // Let user servers handle SSR requests in middleware mode,
           // otherwise the Vite plugin will handle the request
           if (!viteDevServer.config.server.middlewareMode) {
-            viteDevServer.middlewares.use(async (req, res, next) => {
-              try {
-                let build = (await viteDevServer.ssrLoadModule(
-                  serverBuildId
-                )) as ServerBuild;
+            let ssrRuntime = await (viteDevServer.ssrRuntime$);
 
-                let handler = createRequestHandler(build, "development");
-                let nodeHandler: NodeRequestHandler = async (
-                  nodeReq,
-                  nodeRes
-                ) => {
-                  let req = fromNodeRequest(nodeReq);
-                  let res = await handler(req, await remixDevLoadContext(req));
-                  await toNodeRequest(res, nodeRes);
-                };
-                await nodeHandler(req, res);
+            let requestDispatcher = await ssrRuntime.createRequestDispatcher({
+              entrypoint: path.join(__dirname, 'static', cloudflarePlugin ? 'cloudflare-dev-entrypoint.ts' : 'node-dev-entrypoint.ts'),
+            });
+
+            viteDevServer.middlewares.use(async (nodeReq, nodeRes, next) => {
+              try {
+                    try {
+                      let req = fromNodeRequest(nodeReq);
+                      let res = await requestDispatcher(req);
+                      await toNodeRequest(res, nodeRes);
+                    } catch (error) {
+                      next(error);
+                    }
               } catch (error) {
                 next(error);
               }
