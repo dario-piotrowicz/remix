@@ -127,7 +127,7 @@ export type Preset = {
 };
 
 export type VitePluginConfig = SupportedRemixEsbuildUserConfig & {
-  runtime?: 'workerd'|'nodejs'
+  runtime?: "workerd" | "nodejs";
   /**
    * The react router app basename.  Defaults to `"/"`.
    */
@@ -1006,6 +1006,15 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
               // This could be caused by how we copy `node_modules/` into integration test fixtures,
               // so maybe this will be unnecessary once we switch to pnpm
               "@remix-run/node",
+
+              // Add CJS dependencies that break code in workerd
+              // with errors like "require/module/exports is not defined":
+              "react-dom",
+              "react-dom/server",
+              // Remix deps:
+              "set-cookie-parser",
+              "cookie",
+              "@remix-run/react/dist/esm/index.js",
             ],
           },
           esbuild: {
@@ -1023,7 +1032,30 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
             ],
           },
           base: viteUserConfig.base,
-
+          ...(remixUserConfig.runtime === "workerd"
+            ? {
+                ssr: {
+                  noExternal: true,
+                  target: 'webworker',
+                  optimizeDeps: {
+                    // Add CJS dependencies that break code in workerd
+                    // with errors like "require/module/exports is not defined":
+                    include: [
+                      // React deps:
+                      "react",
+                      "react/jsx-runtime",
+                      "react/jsx-dev-runtime",
+                      "react-dom",
+                      "react-dom/server",
+                      // Remix deps:
+                      "set-cookie-parser",
+                      "cookie",
+                      "@remix-run/react/dist/esm/index.js",
+                    ],
+                  },
+                },
+              }
+            : {}),
           // Vite config options for building
           ...(viteCommand === "build"
             ? {
@@ -1270,23 +1302,29 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           // Let user servers handle SSR requests in middleware mode,
           // otherwise the Vite plugin will handle the request
           if (!viteDevServer.config.server.middlewareMode) {
-            let ssrRuntime = await (viteDevServer.ssrRuntime$);
+            let ssrRuntime = await viteDevServer.ssrRuntime$;
 
-            let cloudflare = remixUserConfig.runtime === 'workerd';
+            let cloudflare = remixUserConfig.runtime === "workerd";
 
             let requestDispatcher = await ssrRuntime.createRequestDispatcher({
-              entrypoint: path.join(__dirname, 'static', cloudflare ? 'cloudflare-dev-entrypoint.ts' : 'node-dev-entrypoint.ts'),
+              entrypoint: path.join(
+                __dirname,
+                "static",
+                cloudflare
+                  ? "cloudflare-dev-entrypoint.ts"
+                  : "node-dev-entrypoint.ts"
+              ),
             });
 
             viteDevServer.middlewares.use(async (nodeReq, nodeRes, next) => {
               try {
-                    try {
-                      let req = fromNodeRequest(nodeReq);
-                      let res = await requestDispatcher(req);
-                      await toNodeRequest(res, nodeRes);
-                    } catch (error) {
-                      next(error);
-                    }
+                try {
+                  let req = fromNodeRequest(nodeReq);
+                  let res = await requestDispatcher(req);
+                  await toNodeRequest(res, nodeRes);
+                } catch (error) {
+                  next(error);
+                }
               } catch (error) {
                 next(error);
               }
@@ -1842,8 +1880,7 @@ async function handleSpaMode(
   fse.removeSync(serverBuildDirectoryPath);
 }
 
-
-declare module 'vite' {
+declare module "vite" {
   interface ViteDevServer {
     /**
      * Note: ssrRuntime needs to be promise-based because in the plugin's `configureServer`
@@ -1859,7 +1896,7 @@ export type SSRRuntime = {
 };
 
 export type CreateRequestDispatcher = (
-  options: CreateRequestDispatcherOptions,
+  options: CreateRequestDispatcherOptions
 ) => Promise<DispatchRequest>;
 
 export type CreateRequestDispatcherOptions = {
