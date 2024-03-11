@@ -14,5 +14,3 @@ export const vitePlugin: RemixVitePlugin = (...args) => {
   let { remixVitePlugin } = require("./plugin") as typeof import("./plugin");
   return remixVitePlugin(...args);
 };
-
-export { cloudflareDevProxyVitePlugin } from "./cloudflare-proxy-plugin";

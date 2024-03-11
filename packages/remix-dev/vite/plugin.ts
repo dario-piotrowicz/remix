@@ -127,6 +127,7 @@ export type Preset = {
 };
 
 export type VitePluginConfig = SupportedRemixEsbuildUserConfig & {
+  runtime?: 'workerd'|'nodejs'
   /**
    * The react router app basename.  Defaults to `"/"`.
    */
@@ -1266,18 +1267,15 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
         });
 
         return async () => {
-          let cloudflarePlugin = viteDevServer.config.plugins.find(
-            (p) => p.name === "vite-plugin-remix-cloudflare-proxy"
-          ) as unknown as undefined | { ready: Promise<void> };
-          await cloudflarePlugin?.ready;
-
           // Let user servers handle SSR requests in middleware mode,
           // otherwise the Vite plugin will handle the request
           if (!viteDevServer.config.server.middlewareMode) {
             let ssrRuntime = await (viteDevServer.ssrRuntime$);
 
+            let cloudflare = remixUserConfig.runtime === 'workerd';
+
             let requestDispatcher = await ssrRuntime.createRequestDispatcher({
-              entrypoint: path.join(__dirname, 'static', cloudflarePlugin ? 'cloudflare-dev-entrypoint.ts' : 'node-dev-entrypoint.ts'),
+              entrypoint: path.join(__dirname, 'static', cloudflare ? 'cloudflare-dev-entrypoint.ts' : 'node-dev-entrypoint.ts'),
             });
 
             viteDevServer.middlewares.use(async (nodeReq, nodeRes, next) => {
@@ -1843,3 +1841,29 @@ async function handleSpaMode(
   // Cleanup - we no longer need the server build assets
   fse.removeSync(serverBuildDirectoryPath);
 }
+
+
+declare module 'vite' {
+  interface ViteDevServer {
+    /**
+     * Note: ssrRuntime needs to be promise-based because in the plugin's `configureServer`
+     *       we need to wait until the Vite dev server Http server is ready in order to get
+     *       its address and pass it to the alternative runtime
+     */
+    ssrRuntime$: Promise<SSRRuntime>;
+  }
+}
+
+export type SSRRuntime = {
+  createRequestDispatcher: CreateRequestDispatcher;
+};
+
+export type CreateRequestDispatcher = (
+  options: CreateRequestDispatcherOptions,
+) => Promise<DispatchRequest>;
+
+export type CreateRequestDispatcherOptions = {
+  entrypoint: string;
+};
+
+export type DispatchRequest = (req: Request) => Response | Promise<Response>;
