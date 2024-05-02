@@ -623,7 +623,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
   let updateRemixPluginContext = async (): Promise<void> => {
     let remixConfigPresets: VitePluginConfig[] = (
       await Promise.all(
-        (remixUserConfig.presets ?? []).map(async (preset) => {
+        (remixUserConfig?.presets ?? []).map(async (preset) => {
           if (!preset.name) {
             throw new Error(
               "Remix presets must have a `name` property defined."
@@ -635,7 +635,9 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           }
 
           let remixConfigPreset: VitePluginConfig = omit(
-            await preset.remixConfig({ remixUserConfig }),
+            await preset.remixConfig({
+              remixUserConfig: remixUserConfig ?? {},
+            }),
             excludedRemixConfigPresetKeys
           );
 
@@ -656,7 +658,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
 
     let resolvedRemixUserConfig = {
       ...defaults, // Default values should be completely overridden by user/preset config, not merged
-      ...mergeRemixConfig(...remixConfigPresets, remixUserConfig),
+      ...mergeRemixConfig(...remixConfigPresets, remixUserConfig ?? {}),
     };
 
     let rootDirectory =
@@ -727,7 +729,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
       ssr,
     });
 
-    for (let preset of remixUserConfig.presets ?? []) {
+    for (let preset of remixUserConfig?.presets ?? []) {
       await preset.remixConfigResolved?.({ remixConfig });
     }
 
@@ -1052,7 +1054,6 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
             ctx.remixConfig.ssr === false
               ? "spa"
               : "custom",
-
           ssr: {
             external: isInRemixMonorepo()
               ? [
@@ -1183,6 +1184,9 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
               }
             : undefined),
         };
+      },
+      configEnvironment(name, config, env) {
+          console.log(`\x1b[35m configure environment => ${name} \x1b[0m`);
       },
       async configResolved(resolvedViteConfig) {
         await initEsModuleLexer;
@@ -1372,6 +1376,8 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           // otherwise the Vite plugin will handle the request
           if (!viteDevServer.config.server.middlewareMode) {
             viteDevServer.middlewares.use(async (req, res, next) => {
+              console.log(`\x1b[31m handle request!... \x1b[0m`);
+              debugger;
               try {
                 let build = (await viteDevServer.ssrLoadModule(
                   serverBuildId
