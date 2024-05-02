@@ -1378,8 +1378,9 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
             viteDevServer.middlewares.use(async (req, res, next) => {
               console.log(`\x1b[31m handle request!... \x1b[0m`);
               debugger;
+              let nodeEnv = viteDevServer.environments['node'] as unknown as { ssrLoadModule: typeof viteDevServer['ssrLoadModule'] };
               try {
-                let build = (await viteDevServer.ssrLoadModule(
+                let build = (await nodeEnv.ssrLoadModule(
                   serverBuildId
                 )) as ServerBuild;
 
