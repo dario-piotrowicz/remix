@@ -6,11 +6,7 @@ import * as path from "node:path";
 import * as url from "node:url";
 import * as fse from "fs-extra";
 import babel from "@babel/core";
-import {
-  type ServerBuild,
-  unstable_setDevServerHooks as setDevServerHooks,
-  createRequestHandler,
-} from "@remix-run/server-runtime";
+import { unstable_setDevServerHooks as setDevServerHooks } from "@remix-run/server-runtime";
 import {
   init as initEsModuleLexer,
   parse as esModuleLexer,
@@ -566,18 +562,6 @@ let mergeRemixConfig = (...configs: VitePluginConfig[]): VitePluginConfig => {
   };
 
   return configs.reduce(reducer, {});
-};
-
-type MaybePromise<T> = T | Promise<T>;
-
-let remixDevLoadContext: (
-  request: Request
-) => MaybePromise<Record<string, unknown>> = () => ({});
-
-export let setRemixDevLoadContext = (
-  loadContext: (request: Request) => MaybePromise<Record<string, unknown>>
-) => {
-  remixDevLoadContext = loadContext;
 };
 
 // Inlined from https://github.com/jsdf/deep-freeze
@@ -1185,9 +1169,6 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
             : undefined),
         };
       },
-      configEnvironment(name, config, env) {
-          console.log(`\x1b[35m configure environment => ${name} \x1b[0m`);
-      },
       async configResolved(resolvedViteConfig) {
         await initEsModuleLexer;
 
@@ -1376,21 +1357,29 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           // otherwise the Vite plugin will handle the request
           if (!viteDevServer.config.server.middlewareMode) {
             viteDevServer.middlewares.use(async (req, res, next) => {
-              console.log(`\x1b[31m handle request!... \x1b[0m`);
-              debugger;
-              let nodeEnv = viteDevServer.environments['node'] as unknown as { ssrLoadModule: typeof viteDevServer['ssrLoadModule'] };
-              try {
-                let build = (await nodeEnv.ssrLoadModule(
-                  serverBuildId
-                )) as ServerBuild;
+              let nodeEnv = viteDevServer.environments["node"] as unknown as {
+                api: {
+                  getNodeHandler(opts: {
+                    entrypoint: string;
+                  }): Promise<(req: Request) => Promise<Response>>;
+                };
+              };
 
-                let handler = createRequestHandler(build, "development");
+              try {
+                let handler = await nodeEnv.api.getNodeHandler({
+                  entrypoint: path.join(
+                    __dirname,
+                    "static",
+                    "node-dev-entrypoint.ts"
+                  ),
+                });
+
                 let nodeHandler: NodeRequestHandler = async (
                   nodeReq,
                   nodeRes
                 ) => {
                   let req = fromNodeRequest(nodeReq);
-                  let res = await handler(req, await remixDevLoadContext(req));
+                  let res = await handler(req);
                   await toNodeRequest(res, nodeRes);
                 };
                 await nodeHandler(req, res);
