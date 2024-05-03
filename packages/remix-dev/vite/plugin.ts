@@ -1302,6 +1302,39 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           );
         }
       },
+      configEnvironment(name, config, env) {
+        console.log(`\x1b[34m configEnvironment -> ${name} \x1b[0m`);
+
+        if (name === "workerd") {
+          return {
+            webCompatible: true,
+            resolve: {
+              noExternal: true,
+            },
+            dev: {
+              optimizeDeps: {
+                // Add CJS dependencies that break code in workerd
+                // with errors like "require/module/exports is not defined":
+                include: [
+                  // React deps:
+                  "react",
+                  "react/jsx-runtime",
+                  "react/jsx-dev-runtime",
+                  "react-dom",
+                  "react-dom/server",
+                  // Remix deps:
+                  "set-cookie-parser",
+                  "cookie",
+                  "@remix-run/react/dist/esm/index.js",
+
+                  // this is needed to avoid the following error: `Error: You must render this element inside a <Remix> element`
+                  "@remix-run/react",
+                ],
+              },
+            },
+          };
+        }
+      },
       async configureServer(viteDevServer) {
         setDevServerHooks({
           // Give the request handler access to the critical CSS in dev to avoid a
@@ -1357,22 +1390,51 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           // otherwise the Vite plugin will handle the request
           if (!viteDevServer.config.server.middlewareMode) {
             viteDevServer.middlewares.use(async (req, res, next) => {
-              let nodeEnv = viteDevServer.environments["node"] as unknown as {
-                api: {
-                  getNodeHandler(opts: {
-                    entrypoint: string;
-                  }): Promise<(req: Request) => Promise<Response>>;
-                };
-              };
+              let nodeEnv = viteDevServer.environments["node"] as unknown as
+                | undefined
+                | {
+                    api: {
+                      getNodeHandler(opts: {
+                        entrypoint: string;
+                      }): Promise<(req: Request) => Promise<Response>>;
+                    };
+                  };
+
+              let workerdEnv = viteDevServer.environments[
+                "workerd"
+              ] as unknown as
+                | undefined
+                | {
+                    api: {
+                      getWorkerdHandler(opts: {
+                        entrypoint: string;
+                      }): Promise<(req: Request) => Promise<Response>>;
+                    };
+                  };
 
               try {
-                let handler = await nodeEnv.api.getNodeHandler({
-                  entrypoint: path.join(
-                    __dirname,
-                    "static",
-                    "node-dev-entrypoint.ts"
-                  ),
-                });
+                let handler: (req: Request) => Promise<Response>;
+                if (nodeEnv) {
+                  handler = await nodeEnv.api.getNodeHandler({
+                    entrypoint: path.join(
+                      __dirname,
+                      "static",
+                      "node-dev-entrypoint.ts"
+                    ),
+                  });
+                } else if (workerdEnv) {
+                  handler = await workerdEnv.api.getWorkerdHandler({
+                    entrypoint: path.join(
+                      __dirname,
+                      "static",
+                      "workerd-dev-entrypoint.ts"
+                    ),
+                  });
+                } else {
+                  throw new Error(
+                    "neither the node nor workerd dev environment is present!"
+                  );
+                }
 
                 let nodeHandler: NodeRequestHandler = async (
                   nodeReq,
@@ -1380,7 +1442,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
                 ) => {
                   let req = fromNodeRequest(nodeReq);
                   let res = await handler(req);
-                  await toNodeRequest(res, nodeRes);
+                  await toNodeRequest(new Response(res.body), nodeRes);
                 };
                 await nodeHandler(req, res);
               } catch (error) {
