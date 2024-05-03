@@ -1442,7 +1442,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
                 ) => {
                   let req = fromNodeRequest(nodeReq);
                   let res = await handler(req);
-                  await toNodeRequest(new Response(res.body), nodeRes);
+                  await toNodeRequest(res, nodeRes);
                 };
                 await nodeHandler(req, res);
               } catch (error) {
