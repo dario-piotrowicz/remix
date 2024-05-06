@@ -6,10 +6,17 @@ import {
 // @ts-ignore
 const build = await import("virtual:remix/server-build") as ServerBuild;
 
-const handler = createRequestHandler(build, "development");
+const remixHandler = createRequestHandler(build, "development");
 
-let loadContext = {};
-
-export default function nodeHandler(req: Request): Promise<Response> {
-    return handler(req, loadContext);
+export default function entrypointHandler(req: Request, env: any, ctx: any): Promise<Response> {
+    let loadContext = {
+        cloudflare: {
+            env,
+            cf: (req as any).cf,
+            ctx,
+            // @ts-ignore
+            caches,
+        }
+    };
+    return remixHandler(req, loadContext);
 }
