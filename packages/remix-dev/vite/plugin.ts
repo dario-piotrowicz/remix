@@ -1390,7 +1390,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           // otherwise the Vite plugin will handle the request
           if (!viteDevServer.config.server.middlewareMode) {
             viteDevServer.middlewares.use(async (req, res, next) => {
-              let nodeEnv = viteDevServer.environments["node"] as unknown as
+              let nodeEnv = viteDevServer.environments["node-vm"] as unknown as
                 | undefined
                 | {
                     api: {
@@ -1432,7 +1432,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
                   });
                 } else {
                   throw new Error(
-                    "neither the node nor workerd dev environment is present!"
+                    "neither the node-vm nor workerd dev environment is present!"
                   );
                 }
 
