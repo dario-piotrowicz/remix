@@ -15,6 +15,9 @@ import jsesc from "jsesc";
 import pick from "lodash/pick";
 import omit from "lodash/omit";
 import colors from "picocolors";
+// Note: this type should likely be in Vite itself
+import { type ViteEnvironmentProvider } from 'vite-environment-plugin-workerd';
+import { nodeVMEnvironmentProvider } from 'vite-environment-plugin-node-vm';
 
 import { type ConfigRoute, type RouteManifest } from "../config/routes";
 import {
@@ -230,6 +233,10 @@ export type VitePluginConfig = SupportedRemixEsbuildUserConfig & {
    * as a SPA without server-rendering. Default's to `true`.
    */
   ssr?: boolean;
+  /**
+   * Provider for the ViteEnvironment to be used for SSR
+   */
+  ssrEnvironment?: ViteEnvironmentProvider;
 };
 
 type BuildEndHook = (args: {
@@ -1030,6 +1037,22 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           },
         } satisfies Vite.BuildOptions["rollupOptions"];
 
+        let viteEnvironmentProvider: ViteEnvironmentProvider;
+
+        if(remixUserConfig?.ssrEnvironment) {
+          viteEnvironmentProvider = remixUserConfig.ssrEnvironment;
+        } else {
+          // we default back to node-vm if no ssrEnvironment was specified
+          viteEnvironmentProvider = await nodeVMEnvironmentProvider();
+        }
+
+        // Note: here we take the metadata name and just use it as the ssr environment
+        //       name, but that's not mandatory we could use any names we want
+        let ssrEnvironmentName = viteEnvironmentProvider.metadata.name;
+        // Note: there's some wrong types mismatch here, I think it is simply because
+        //       different local copies of Vite or something, so this isn't really an issue
+        let ssrEnvironment = viteEnvironmentProvider as unknown as Vite.ResolvedConfig['environments'][string];
+
         return {
           __remixPluginContext: ctx,
           appType:
@@ -1038,6 +1061,9 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
             ctx.remixConfig.ssr === false
               ? "spa"
               : "custom",
+          environments: {
+            [ssrEnvironmentName]: ssrEnvironment,
+          },
           ssr: {
             external: isInRemixMonorepo()
               ? [

@@ -73,7 +73,9 @@
     "set-cookie-parser": "^2.6.0",
     "tar-fs": "^2.1.1",
     "tsconfig-paths": "^4.0.0",
-    "ws": "^7.4.5"
+    "ws": "^7.4.5",
+    "vite-environment-plugin-workerd": "/Users/dario/Desktop/vite-environment-6.0.0-alpha-experimentations/packages/vite-environment-plugin-workerd",
+    "vite-environment-plugin-node-vm": "/Users/dario/Desktop/vite-environment-6.0.0-alpha-experimentations/packages/vite-environment-plugin-node-vm"
   },
   "devDependencies": {
     "@remix-run/cloudflare": "workspace:*",

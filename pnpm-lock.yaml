@@ -997,6 +997,12 @@ importers:
       typescript:
         specifier: ^5.1.0
         version: 5.1.6
+      vite-environment-plugin-node-vm:
+        specifier: /Users/dario/Desktop/vite-environment-6.0.0-alpha-experimentations/packages/vite-environment-plugin-node-vm
+        version: link:../../../../../Desktop/vite-environment-6.0.0-alpha-experimentations/packages/vite-environment-plugin-node-vm
+      vite-environment-plugin-workerd:
+        specifier: /Users/dario/Desktop/vite-environment-6.0.0-alpha-experimentations/packages/vite-environment-plugin-workerd
+        version: link:../../../../../Desktop/vite-environment-6.0.0-alpha-experimentations/packages/vite-environment-plugin-workerd
       ws:
         specifier: ^7.4.5
         version: 7.5.9
