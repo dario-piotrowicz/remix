@@ -16,7 +16,7 @@ import pick from "lodash/pick";
 import omit from "lodash/omit";
 import colors from "picocolors";
 // Note: this type should likely be in Vite itself
-import { type ViteEnvironmentProvider } from 'vite-environment-plugin-workerd';
+import { type ViteEnvironmentProvider } from "vite-environment-plugin-workerd";
 
 import { type ConfigRoute, type RouteManifest } from "../config/routes";
 import {
@@ -236,6 +236,11 @@ export type VitePluginConfig = SupportedRemixEsbuildUserConfig & {
    * Provider for the ViteEnvironment to be used for SSR
    */
   ssrEnvironment?: ViteEnvironmentProvider;
+  /**
+   * The type of ssr runtime being used, depending on that different entrypoint handlers are used
+   * ('node' is the default)
+   */
+  ssrRuntime?: "node" | "workerd";
 };
 
 type BuildEndHook = (args: {
@@ -590,6 +595,14 @@ let deepFreeze = (o: any) => {
   });
   return o;
 };
+
+// Note: this is the name of the ssr environment, ideally I'd like to simply re-use `ssr` here
+//       but if I try to do that I get the following error:
+//       `TypeError: Cannot add property optimizeDeps, object is not extensible`
+//       triggered here: https://github.com/vitejs/vite/blob/89ec69c63/packages/vite/src/node/config.ts#L890-L893
+//       I assume that the default `ssr` config is being freezed/sealed somewhere, is this intentional?
+//       shouldn't plugins be able to override/customize the ssr environment?
+const ssrEnvName = "ssrEnv";
 
 export type RemixVitePlugin = (config?: VitePluginConfig) => Vite.Plugin[];
 export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
@@ -1038,20 +1051,20 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
 
         let viteEnvironmentProvider: ViteEnvironmentProvider;
 
-        if(remixUserConfig?.ssrEnvironment) {
+        if (remixUserConfig?.ssrEnvironment) {
           viteEnvironmentProvider = remixUserConfig.ssrEnvironment;
         } else {
-          let { nodeVMEnvironmentProvider } = await import('vite-environment-plugin-node-vm');
           // we default back to node-vm if no ssrEnvironment was specified
+          let { nodeVMEnvironmentProvider } = await import(
+            "vite-environment-plugin-node-vm"
+          );
           viteEnvironmentProvider = await nodeVMEnvironmentProvider();
         }
 
-        // Note: here we take the metadata name and just use it as the ssr environment
-        //       name, but that's not mandatory we could use any names we want
-        let ssrEnvironmentName = viteEnvironmentProvider.metadata.name;
         // Note: there's some wrong types mismatch here, I think it is simply because
         //       different local copies of Vite or something, so this isn't really an issue
-        let ssrEnvironment = viteEnvironmentProvider as unknown as Vite.ResolvedConfig['environments'][string];
+        let ssrEnvironment =
+          viteEnvironmentProvider as unknown as Vite.ResolvedConfig["environments"][string];
 
         return {
           __remixPluginContext: ctx,
@@ -1062,15 +1075,15 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
               ? "spa"
               : "custom",
           environments: {
-            'client': {
+            client: {
               build: {
                 async createEnvironment(name, config) {
-                  let { BuildEnvironment } = await import('vite');
+                  let { BuildEnvironment } = await import("vite");
                   return new BuildEnvironment(name, config);
-                }
+                },
               },
             },
-            [ssrEnvironmentName]: ssrEnvironment,
+            [ssrEnvName]: ssrEnvironment,
           },
           ssr: {
             external: isInRemixMonorepo()
@@ -1339,7 +1352,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
       configEnvironment(name, config, env) {
         console.log(`\x1b[34m configEnvironment -> ${name} \x1b[0m`);
 
-        if (name === "workerd") {
+        if (name === ssrEnvName && remixUserConfig?.ssrRuntime === "workerd") {
           return {
             webCompatible: true,
             resolve: {
@@ -1426,23 +1439,11 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           // otherwise the Vite plugin will handle the request
           if (!viteDevServer.config.server.middlewareMode) {
             viteDevServer.middlewares.use(async (req, res, next) => {
-              let nodeEnv = viteDevServer.environments["node-vm"] as unknown as
+              let devEnv = viteDevServer.environments[ssrEnvName] as unknown as
                 | undefined
                 | {
                     api: {
-                      getNodeHandler(opts: {
-                        entrypoint: string;
-                      }): Promise<(req: Request) => Promise<Response>>;
-                    };
-                  };
-
-              let workerdEnv = viteDevServer.environments[
-                "workerd"
-              ] as unknown as
-                | undefined
-                | {
-                    api: {
-                      getWorkerdHandler(opts: {
+                      getHandler(opts: {
                         entrypoint: string;
                       }): Promise<(req: Request) => Promise<Response>>;
                     };
@@ -1450,26 +1451,18 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
 
               try {
                 let handler: (req: Request) => Promise<Response>;
-                if (nodeEnv) {
-                  handler = await nodeEnv.api.getNodeHandler({
+                if (devEnv) {
+                  handler = await devEnv.api.getHandler({
                     entrypoint: path.join(
                       __dirname,
                       "static",
-                      "node-dev-entrypoint.ts"
-                    ),
-                  });
-                } else if (workerdEnv) {
-                  handler = await workerdEnv.api.getWorkerdHandler({
-                    entrypoint: path.join(
-                      __dirname,
-                      "static",
-                      "workerd-dev-entrypoint.ts"
+                      remixUserConfig?.ssrRuntime === "workerd"
+                        ? "workerd-dev-entrypoint.ts"
+                        : "node-dev-entrypoint.ts"
                     ),
                   });
                 } else {
-                  throw new Error(
-                    "neither the node-vm nor workerd dev environment is present!"
-                  );
+                  throw new Error("no ssr dev environment is present!");
                 }
 
                 let nodeHandler: NodeRequestHandler = async (
