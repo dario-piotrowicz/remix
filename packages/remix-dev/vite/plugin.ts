@@ -1326,6 +1326,8 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
                   "set-cookie-parser",
                   "cookie",
                   "@remix-run/react/dist/esm/index.js",
+                  "@remix-run/server-runtime",
+                  "isbot",
 
                   // this is needed to avoid the following error: `Error: You must render this element inside a <Remix> element`
                   "@remix-run/react",
