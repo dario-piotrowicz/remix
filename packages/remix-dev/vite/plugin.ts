@@ -236,11 +236,6 @@ export type VitePluginConfig = SupportedRemixEsbuildUserConfig & {
    * Provider for the ViteEnvironment to be used for SSR
    */
   ssrEnvironment?: ViteEnvironmentProvider;
-  /**
-   * The type of ssr runtime being used, depending on that different entrypoint handlers are used
-   * ('node' is the default)
-   */
-  ssrRuntime?: "node" | "workerd";
 };
 
 type BuildEndHook = (args: {
@@ -603,6 +598,8 @@ let deepFreeze = (o: any) => {
 //       I assume that the default `ssr` config is being freezed/sealed somewhere, is this intentional?
 //       shouldn't plugins be able to override/customize the ssr environment?
 const ssrEnvName = "ssrEnv";
+
+let entrypoint = "node-dev-entrypoint.ts";
 
 export type RemixVitePlugin = (config?: VitePluginConfig) => Vite.Plugin[];
 export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
@@ -1352,7 +1349,13 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
       configEnvironment(name, config, env) {
         console.log(`\x1b[34m configEnvironment -> ${name} \x1b[0m`);
 
-        if (name === ssrEnvName && remixUserConfig?.ssrRuntime === "workerd") {
+        if (
+          name === ssrEnvName &&
+          (config as { metadata?: { runtimeName: string } } | undefined)
+            ?.metadata?.runtimeName === "workerd"
+        ) {
+          // the runtime in use is workerd so we need to update the entrypoint accordingly
+          entrypoint = "workerd-dev-entrypoint.ts";
           return {
             webCompatible: true,
             resolve: {
@@ -1453,13 +1456,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
                 let handler: (req: Request) => Promise<Response>;
                 if (devEnv) {
                   handler = await devEnv.api.getHandler({
-                    entrypoint: path.join(
-                      __dirname,
-                      "static",
-                      remixUserConfig?.ssrRuntime === "workerd"
-                        ? "workerd-dev-entrypoint.ts"
-                        : "node-dev-entrypoint.ts"
-                    ),
+                    entrypoint: path.join(__dirname, "static", entrypoint),
                   });
                 } else {
                   throw new Error("no ssr dev environment is present!");
