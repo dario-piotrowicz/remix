@@ -16,7 +16,7 @@ import pick from "lodash/pick";
 import omit from "lodash/omit";
 import colors from "picocolors";
 // Note: this type should likely be in Vite itself
-import { type ViteEnvironmentProvider } from "vite-environment-plugin-workerd";
+import { type ViteEnvironmentProvider } from "vite-environment-provider-workerd";
 
 import { type ConfigRoute, type RouteManifest } from "../config/routes";
 import {
@@ -1053,7 +1053,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
         } else {
           // we default back to node-vm if no ssrEnvironment was specified
           let { nodeVMEnvironmentProvider } = await import(
-            "vite-environment-plugin-node-vm"
+            "vite-environment-provider-node-vm"
           );
           viteEnvironmentProvider = await nodeVMEnvironmentProvider();
         }
