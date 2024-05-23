@@ -1072,14 +1072,6 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
               ? "spa"
               : "custom",
           environments: {
-            client: {
-              build: {
-                async createEnvironment(name, config) {
-                  let { BuildEnvironment } = await import("vite");
-                  return new BuildEnvironment(name, config);
-                },
-              },
-            },
             [ssrEnvName]: ssrEnvironment,
           },
           ssr: {
