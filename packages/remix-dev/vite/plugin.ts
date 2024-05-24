@@ -601,6 +601,23 @@ const ssrEnvName = "ssrEnv";
 
 let entrypoint = "node-dev-entrypoint.ts";
 
+const sharedOptimizeDepsIncludeEntries = [
+  // Pre-bundle React dependencies to avoid React duplicates,
+  // even if React dependencies are not direct dependencies.
+  // https://react.dev/warnings/invalid-hook-call-warning#duplicate-react
+  "react",
+  "react/jsx-runtime",
+  "react/jsx-dev-runtime",
+  "react-dom/client",
+
+  // Pre-bundle Remix dependencies to avoid Remix router duplicates.
+  // Our remix-remix-react-proxy plugin does not process default client and
+  // server entry files since those come from within `node_modules`.
+  // That means that before Vite pre-bundles dependencies (e.g. first time dev server is run)
+  // mismatching Remix routers cause `Error: You must render this element inside a <Remix> element`.
+  "@remix-run/react",
+];
+
 export type RemixVitePlugin = (config?: VitePluginConfig) => Vite.Plugin[];
 export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
   // Prevent mutations to the user config
@@ -1098,20 +1115,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           },
           optimizeDeps: {
             include: [
-              // Pre-bundle React dependencies to avoid React duplicates,
-              // even if React dependencies are not direct dependencies.
-              // https://react.dev/warnings/invalid-hook-call-warning#duplicate-react
-              "react",
-              "react/jsx-runtime",
-              "react/jsx-dev-runtime",
-              "react-dom/client",
-
-              // Pre-bundle Remix dependencies to avoid Remix router duplicates.
-              // Our remix-remix-react-proxy plugin does not process default client and
-              // server entry files since those come from within `node_modules`.
-              // That means that before Vite pre-bundles dependencies (e.g. first time dev server is run)
-              // mismatching Remix routers cause `Error: You must render this element inside a <Remix> element`.
-              "@remix-run/react",
+              ...sharedOptimizeDepsIncludeEntries,
 
               // For some reason, the `vite-dotenv` integration test consistently fails on webkit
               // with `504 (Outdated Optimize Dep)` from Vite  unless `@remix-run/node` is included
@@ -1351,28 +1355,15 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           return {
             webCompatible: true,
             resolve: {
-              noExternal: true,
+              noExternal: [/react/],
             },
             dev: {
               optimizeDeps: {
                 // Add CJS dependencies that break code in workerd
                 // with errors like "require/module/exports is not defined":
                 include: [
-                  // React deps:
-                  "react",
-                  "react/jsx-runtime",
-                  "react/jsx-dev-runtime",
-                  "react-dom",
+                  ...sharedOptimizeDepsIncludeEntries,
                   "react-dom/server",
-                  // Remix deps:
-                  "set-cookie-parser",
-                  "cookie",
-                  "@remix-run/react/dist/esm/index.js",
-                  "@remix-run/server-runtime",
-                  "isbot",
-
-                  // this is needed to avoid the following error: `Error: You must render this element inside a <Remix> element`
-                  "@remix-run/react",
                 ],
               },
             },
