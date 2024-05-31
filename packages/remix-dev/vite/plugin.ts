@@ -1052,6 +1052,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           viteEnvironmentProvider = remixUserConfig.ssrEnvironment;
         } else {
           // we default back to node-vm if no ssrEnvironment was specified
+          // eslint-disable-next-line import/no-extraneous-dependencies
           let { nodeVMEnvironmentProvider } = await import(
             "vite-environment-provider-node-vm"
           );
@@ -1073,28 +1074,6 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
               : "custom",
           environments: {
             [ssrEnvName]: ssrEnvironment,
-          },
-          ssr: {
-            external: isInRemixMonorepo()
-              ? [
-                  // This is only needed within the Remix repo because these
-                  // packages are linked to a directory outside of node_modules
-                  // so Vite treats them as internal code by default.
-                  "@remix-run/architect",
-                  "@remix-run/cloudflare-pages",
-                  "@remix-run/cloudflare-workers",
-                  "@remix-run/cloudflare",
-                  "@remix-run/css-bundle",
-                  "@remix-run/deno",
-                  "@remix-run/dev",
-                  "@remix-run/express",
-                  "@remix-run/netlify",
-                  "@remix-run/node",
-                  "@remix-run/react",
-                  "@remix-run/serve",
-                  "@remix-run/server-runtime",
-                ]
-              : undefined,
           },
           optimizeDeps: {
             include: [
@@ -1338,21 +1317,47 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           );
         }
       },
-      configEnvironment(name, config, env) {
-        console.log(`\x1b[34m configEnvironment -> ${name} \x1b[0m`);
-
-        if (
-          name === ssrEnvName &&
-          (config as { metadata?: { runtimeName: string } } | undefined)
-            ?.metadata?.runtimeName === "workerd"
-        ) {
-          // the runtime in use is workerd so we need to update the entrypoint accordingly
-          entrypoint = "workerd-dev-entrypoint.ts";
-          return {
-            webCompatible: true,
-          };
+      configEnvironment(name, config) {
+        if (name === ssrEnvName) {
+          if(
+            (config as { metadata?: { runtimeName: string } } | undefined)
+              ?.metadata?.runtimeName === "workerd"
+          ) {
+            // the runtime in use is workerd so we need to update the entrypoint accordingly
+            entrypoint = "workerd-dev-entrypoint.ts";
+            return {
+              webCompatible: true,
+            };
+          } else {
+            // the runtime in use is node-vm
+            return {
+              resolve: {
+                mainFields: [ 'main' ],
+                external: isInRemixMonorepo()
+                ? [
+                    // This is only needed within the Remix repo because these
+                    // packages are linked to a directory outside of node_modules
+                    // so Vite treats them as internal code by default.
+                    "@remix-run/architect",
+                    "@remix-run/cloudflare-pages",
+                    "@remix-run/cloudflare-workers",
+                    "@remix-run/cloudflare",
+                    "@remix-run/css-bundle",
+                    "@remix-run/deno",
+                    "@remix-run/dev",
+                    "@remix-run/express",
+                    "@remix-run/netlify",
+                    "@remix-run/node",
+                    "@remix-run/react",
+                    "@remix-run/serve",
+                    "@remix-run/server-runtime",
+                  ]
+                : undefined,
+              },
+            }
+          }
         }
-      },
+        },
       async configureServer(viteDevServer) {
         setDevServerHooks({
           // Give the request handler access to the critical CSS in dev to avoid a
