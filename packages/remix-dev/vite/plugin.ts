@@ -6,11 +6,7 @@ import * as path from "node:path";
 import * as url from "node:url";
 import * as fse from "fs-extra";
 import babel from "@babel/core";
-import {
-  type ServerBuild,
-  unstable_setDevServerHooks as setDevServerHooks,
-  createRequestHandler,
-} from "@remix-run/server-runtime";
+import { unstable_setDevServerHooks as setDevServerHooks } from "@remix-run/server-runtime";
 import {
   init as initEsModuleLexer,
   parse as esModuleLexer,
@@ -19,6 +15,8 @@ import jsesc from "jsesc";
 import pick from "lodash/pick";
 import omit from "lodash/omit";
 import colors from "picocolors";
+// Note: this type should likely be in Vite itself
+import { type ViteEnvironmentProvider } from "vite-environment-provider-workerd";
 
 import { type ConfigRoute, type RouteManifest } from "../config/routes";
 import {
@@ -234,6 +232,10 @@ export type VitePluginConfig = SupportedRemixEsbuildUserConfig & {
    * as a SPA without server-rendering. Default's to `true`.
    */
   ssr?: boolean;
+  /**
+   * Provider for the ViteEnvironment to be used for SSR
+   */
+  ssrEnvironment?: ViteEnvironmentProvider;
 };
 
 type BuildEndHook = (args: {
@@ -568,18 +570,6 @@ let mergeRemixConfig = (...configs: VitePluginConfig[]): VitePluginConfig => {
   return configs.reduce(reducer, {});
 };
 
-type MaybePromise<T> = T | Promise<T>;
-
-let remixDevLoadContext: (
-  request: Request
-) => MaybePromise<Record<string, unknown>> = () => ({});
-
-export let setRemixDevLoadContext = (
-  loadContext: (request: Request) => MaybePromise<Record<string, unknown>>
-) => {
-  remixDevLoadContext = loadContext;
-};
-
 // Inlined from https://github.com/jsdf/deep-freeze
 let deepFreeze = (o: any) => {
   Object.freeze(o);
@@ -600,6 +590,16 @@ let deepFreeze = (o: any) => {
   });
   return o;
 };
+
+// Note: this is the name of the ssr environment, ideally I'd like to simply re-use `ssr` here
+//       but if I try to do that I get the following error:
+//       `TypeError: Cannot add property optimizeDeps, object is not extensible`
+//       triggered here: https://github.com/vitejs/vite/blob/89ec69c63/packages/vite/src/node/config.ts#L890-L893
+//       I assume that the default `ssr` config is being freezed/sealed somewhere, is this intentional?
+//       shouldn't plugins be able to override/customize the ssr environment?
+const ssrEnvName = "ssrEnv";
+
+let entrypoint = "node-dev-entrypoint.ts";
 
 export type RemixVitePlugin = (config?: VitePluginConfig) => Vite.Plugin[];
 export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
@@ -623,7 +623,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
   let updateRemixPluginContext = async (): Promise<void> => {
     let remixConfigPresets: VitePluginConfig[] = (
       await Promise.all(
-        (remixUserConfig.presets ?? []).map(async (preset) => {
+        (remixUserConfig?.presets ?? []).map(async (preset) => {
           if (!preset.name) {
             throw new Error(
               "Remix presets must have a `name` property defined."
@@ -635,7 +635,9 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           }
 
           let remixConfigPreset: VitePluginConfig = omit(
-            await preset.remixConfig({ remixUserConfig }),
+            await preset.remixConfig({
+              remixUserConfig: remixUserConfig ?? {},
+            }),
             excludedRemixConfigPresetKeys
           );
 
@@ -656,7 +658,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
 
     let resolvedRemixUserConfig = {
       ...defaults, // Default values should be completely overridden by user/preset config, not merged
-      ...mergeRemixConfig(...remixConfigPresets, remixUserConfig),
+      ...mergeRemixConfig(...remixConfigPresets, remixUserConfig ?? {}),
     };
 
     let rootDirectory =
@@ -727,7 +729,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
       ssr,
     });
 
-    for (let preset of remixUserConfig.presets ?? []) {
+    for (let preset of remixUserConfig?.presets ?? []) {
       await preset.remixConfigResolved?.({ remixConfig });
     }
 
@@ -1044,6 +1046,24 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           },
         } satisfies Vite.BuildOptions["rollupOptions"];
 
+        let viteEnvironmentProvider: ViteEnvironmentProvider;
+
+        if (remixUserConfig?.ssrEnvironment) {
+          viteEnvironmentProvider = remixUserConfig.ssrEnvironment;
+        } else {
+          // we default back to node-vm if no ssrEnvironment was specified
+          // eslint-disable-next-line import/no-extraneous-dependencies
+          let { nodeVMEnvironmentProvider } = await import(
+            "vite-environment-provider-node-vm"
+          );
+          viteEnvironmentProvider = await nodeVMEnvironmentProvider();
+        }
+
+        // Note: there's some wrong types mismatch here, I think it is simply because
+        //       different local copies of Vite or something, so this isn't really an issue
+        let ssrEnvironment =
+          viteEnvironmentProvider as unknown as Vite.ResolvedConfig["environments"][string];
+
         return {
           __remixPluginContext: ctx,
           appType:
@@ -1052,28 +1072,8 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
             ctx.remixConfig.ssr === false
               ? "spa"
               : "custom",
-
-          ssr: {
-            external: isInRemixMonorepo()
-              ? [
-                  // This is only needed within the Remix repo because these
-                  // packages are linked to a directory outside of node_modules
-                  // so Vite treats them as internal code by default.
-                  "@remix-run/architect",
-                  "@remix-run/cloudflare-pages",
-                  "@remix-run/cloudflare-workers",
-                  "@remix-run/cloudflare",
-                  "@remix-run/css-bundle",
-                  "@remix-run/deno",
-                  "@remix-run/dev",
-                  "@remix-run/express",
-                  "@remix-run/netlify",
-                  "@remix-run/node",
-                  "@remix-run/react",
-                  "@remix-run/serve",
-                  "@remix-run/server-runtime",
-                ]
-              : undefined,
+          environments: {
+            [ssrEnvName]: ssrEnvironment,
           },
           optimizeDeps: {
             include: [
@@ -1317,6 +1317,47 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           );
         }
       },
+      configEnvironment(name, config) {
+        if (name === ssrEnvName) {
+          if(
+            (config as { metadata?: { runtimeName: string } } | undefined)
+              ?.metadata?.runtimeName === "workerd"
+          ) {
+            // the runtime in use is workerd so we need to update the entrypoint accordingly
+            entrypoint = "workerd-dev-entrypoint.ts";
+            return {
+              webCompatible: true,
+            };
+          } else {
+            // the runtime in use is node-vm
+            return {
+              resolve: {
+                mainFields: [ 'main' ],
+                external: isInRemixMonorepo()
+                ? [
+                    // This is only needed within the Remix repo because these
+                    // packages are linked to a directory outside of node_modules
+                    // so Vite treats them as internal code by default.
+                    "@remix-run/architect",
+                    "@remix-run/cloudflare-pages",
+                    "@remix-run/cloudflare-workers",
+                    "@remix-run/cloudflare",
+                    "@remix-run/css-bundle",
+                    "@remix-run/deno",
+                    "@remix-run/dev",
+                    "@remix-run/express",
+                    "@remix-run/netlify",
+                    "@remix-run/node",
+                    "@remix-run/react",
+                    "@remix-run/serve",
+                    "@remix-run/server-runtime",
+                  ]
+                : undefined,
+              },
+            }
+          }
+        }
+        },
       async configureServer(viteDevServer) {
         setDevServerHooks({
           // Give the request handler access to the critical CSS in dev to avoid a
@@ -1372,18 +1413,32 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           // otherwise the Vite plugin will handle the request
           if (!viteDevServer.config.server.middlewareMode) {
             viteDevServer.middlewares.use(async (req, res, next) => {
-              try {
-                let build = (await viteDevServer.ssrLoadModule(
-                  serverBuildId
-                )) as ServerBuild;
+              let devEnv = viteDevServer.environments[ssrEnvName] as unknown as
+                | undefined
+                | {
+                    api: {
+                      getHandler(opts: {
+                        entrypoint: string;
+                      }): Promise<(req: Request) => Promise<Response>>;
+                    };
+                  };
 
-                let handler = createRequestHandler(build, "development");
+              try {
+                let handler: (req: Request) => Promise<Response>;
+                if (devEnv) {
+                  handler = await devEnv.api.getHandler({
+                    entrypoint: path.join(__dirname, "static", entrypoint),
+                  });
+                } else {
+                  throw new Error("no ssr dev environment is present!");
+                }
+
                 let nodeHandler: NodeRequestHandler = async (
                   nodeReq,
                   nodeRes
                 ) => {
                   let req = fromNodeRequest(nodeReq);
-                  let res = await handler(req, await remixDevLoadContext(req));
+                  let res = await handler(req);
                   await toNodeRequest(res, nodeRes);
                 };
                 await nodeHandler(req, res);
