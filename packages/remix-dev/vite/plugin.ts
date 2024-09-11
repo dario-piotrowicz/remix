@@ -1045,31 +1045,19 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           },
         } satisfies Vite.BuildOptions["rollupOptions"];
 
-        let environments = {};
-        if (
-          viteUserConfig.environments &&
-          !viteUserConfig.environments[ssrEnvName]
-        ) {
-          let createNodeVmEnvironment = await import(
-            "vite-environment-provider-node-vm"
-          ).then((m) => m.createNodeVmEnvironment);
-          environments = {
-            [ssrEnvName]: createNodeVmEnvironment(),
-          };
-        }
-
         return {
           __remixPluginContext: ctx,
+          // Note: we can set the consumer here and it will get inherited by the underlying environment
+          //       ideally we should set the consumer in the cloudflare environment plugin instead
+          //       but that doesn't seem to work right now because of this bug: https://github.com/vitejs/vite/pull/18079
+          //       after the PR is merged look into setting the consumer in the cloudflare environment plugin
+          // consumer: ctx.remixConfig.ssr ? "server" : "client",
           appType:
             viteCommand === "serve" &&
             viteConfigEnv.mode === "production" &&
             ctx.remixConfig.ssr === false
               ? "spa"
               : "custom",
-          // environments: {
-          //   [ssrEnvName]: ssrEnvironment,
-          // },
-          environments,
           optimizeDeps: {
             include: [
               // Pre-bundle React dependencies to avoid React duplicates,
@@ -1320,14 +1308,11 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           ) {
             // the runtime in use is workerd so we need to update the entrypoint accordingly
             entrypoint = "workerd-dev-entrypoint.ts";
-            return {
-              webCompatible: true,
-            };
+            return {};
           } else {
             // the runtime in use is node-vm
             return {
               resolve: {
-                mainFields: ["main"],
                 external: isInRemixMonorepo()
                   ? [
                       // This is only needed within the Remix repo because these
