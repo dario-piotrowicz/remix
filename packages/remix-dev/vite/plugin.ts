@@ -15,8 +15,6 @@ import jsesc from "jsesc";
 import pick from "lodash/pick";
 import omit from "lodash/omit";
 import colors from "picocolors";
-// Note: this type should likely be in Vite itself
-import { type ViteEnvironmentProvider } from "vite-environment-provider-workerd";
 
 import { type ConfigRoute, type RouteManifest } from "../config/routes";
 import {
@@ -235,7 +233,7 @@ export type VitePluginConfig = SupportedRemixEsbuildUserConfig & {
   /**
    * Provider for the ViteEnvironment to be used for SSR
    */
-  ssrEnvironment?: ViteEnvironmentProvider;
+  ssrEnvironment?: (environmentName: string, options?: any) => Vite.Plugin[];
 };
 
 type BuildEndHook = (args: {
@@ -306,12 +304,16 @@ let vmods = [serverBuildId, serverManifestId, browserManifestId];
 
 const invalidateVirtualModules = (viteDevServer: Vite.ViteDevServer) => {
   vmods.forEach((vmod) => {
-    let mod = viteDevServer.moduleGraph.getModuleById(
-      VirtualModule.resolve(vmod)
+    [viteDevServer, ...Object.values(viteDevServer.environments)].forEach(
+      ({ moduleGraph }) => {
+        let mod = moduleGraph.getModuleById(VirtualModule.resolve(vmod));
+        if (mod) {
+          moduleGraph.invalidateModule(
+            mod as Vite.ModuleNode & Vite.EnvironmentModuleNode
+          );
+        }
+      }
     );
-    if (mod) {
-      viteDevServer.moduleGraph.invalidateModule(mod);
-    }
   });
 };
 
@@ -998,6 +1000,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
   };
 
   return [
+    ...(remixUserConfig?.ssrEnvironment?.(ssrEnvName) as Vite.Plugin[]),
     {
       name: "remix",
       config: async (_viteUserConfig, _viteConfigEnv) => {
@@ -1046,35 +1049,19 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           },
         } satisfies Vite.BuildOptions["rollupOptions"];
 
-        let viteEnvironmentProvider: ViteEnvironmentProvider;
-
-        if (remixUserConfig?.ssrEnvironment) {
-          viteEnvironmentProvider = remixUserConfig.ssrEnvironment;
-        } else {
-          // we default back to node-vm if no ssrEnvironment was specified
-          // eslint-disable-next-line import/no-extraneous-dependencies
-          let { nodeVMEnvironmentProvider } = await import(
-            "vite-environment-provider-node-vm"
-          );
-          viteEnvironmentProvider = await nodeVMEnvironmentProvider();
-        }
-
-        // Note: there's some wrong types mismatch here, I think it is simply because
-        //       different local copies of Vite or something, so this isn't really an issue
-        let ssrEnvironment =
-          viteEnvironmentProvider as unknown as Vite.ResolvedConfig["environments"][string];
-
         return {
           __remixPluginContext: ctx,
+          // Note: we can set the consumer here and it will get inherited by the underlying environment
+          //       ideally we should set the consumer in the cloudflare environment plugin instead
+          //       but that doesn't seem to work right now because of this bug: https://github.com/vitejs/vite/pull/18079
+          //       after the PR is merged look into setting the consumer in the cloudflare environment plugin
+          // consumer: ctx.remixConfig.ssr ? "server" : "client",
           appType:
             viteCommand === "serve" &&
             viteConfigEnv.mode === "production" &&
             ctx.remixConfig.ssr === false
               ? "spa"
               : "custom",
-          environments: {
-            [ssrEnvName]: ssrEnvironment,
-          },
           optimizeDeps: {
             include: [
               // Pre-bundle React dependencies to avoid React duplicates,
@@ -1319,45 +1306,42 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
       },
       configEnvironment(name, config) {
         if (name === ssrEnvName) {
-          if(
+          if (
             (config as { metadata?: { runtimeName: string } } | undefined)
               ?.metadata?.runtimeName === "workerd"
           ) {
             // the runtime in use is workerd so we need to update the entrypoint accordingly
             entrypoint = "workerd-dev-entrypoint.ts";
-            return {
-              webCompatible: true,
-            };
+            return {};
           } else {
             // the runtime in use is node-vm
             return {
               resolve: {
-                mainFields: [ 'main' ],
                 external: isInRemixMonorepo()
-                ? [
-                    // This is only needed within the Remix repo because these
-                    // packages are linked to a directory outside of node_modules
-                    // so Vite treats them as internal code by default.
-                    "@remix-run/architect",
-                    "@remix-run/cloudflare-pages",
-                    "@remix-run/cloudflare-workers",
-                    "@remix-run/cloudflare",
-                    "@remix-run/css-bundle",
-                    "@remix-run/deno",
-                    "@remix-run/dev",
-                    "@remix-run/express",
-                    "@remix-run/netlify",
-                    "@remix-run/node",
-                    "@remix-run/react",
-                    "@remix-run/serve",
-                    "@remix-run/server-runtime",
-                  ]
-                : undefined,
+                  ? [
+                      // This is only needed within the Remix repo because these
+                      // packages are linked to a directory outside of node_modules
+                      // so Vite treats them as internal code by default.
+                      "@remix-run/architect",
+                      "@remix-run/cloudflare-pages",
+                      "@remix-run/cloudflare-workers",
+                      "@remix-run/cloudflare",
+                      "@remix-run/css-bundle",
+                      "@remix-run/deno",
+                      "@remix-run/dev",
+                      "@remix-run/express",
+                      "@remix-run/netlify",
+                      "@remix-run/node",
+                      "@remix-run/react",
+                      "@remix-run/serve",
+                      "@remix-run/server-runtime",
+                    ]
+                  : undefined,
               },
-            }
+            };
           }
         }
-        },
+      },
       async configureServer(viteDevServer) {
         setDevServerHooks({
           // Give the request handler access to the critical CSS in dev to avoid a

@@ -139,7 +139,7 @@
   },
   "pnpm": {
     "overrides": {
-      "vite": "^6.0.0-alpha"
+      "vite": "https://pkg.pr.new/vite@main"
     },
     "patchedDependencies": {
       "@changesets/assemble-release-plan@5.2.2": "patches/@changesets__assemble-release-plan@5.2.2.patch"
