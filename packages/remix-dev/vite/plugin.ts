@@ -304,12 +304,16 @@ let vmods = [serverBuildId, serverManifestId, browserManifestId];
 
 const invalidateVirtualModules = (viteDevServer: Vite.ViteDevServer) => {
   vmods.forEach((vmod) => {
-    let mod = viteDevServer.moduleGraph.getModuleById(
-      VirtualModule.resolve(vmod)
+    [viteDevServer, ...Object.values(viteDevServer.environments)].forEach(
+      ({ moduleGraph }) => {
+        let mod = moduleGraph.getModuleById(VirtualModule.resolve(vmod));
+        if (mod) {
+          moduleGraph.invalidateModule(
+            mod as Vite.ModuleNode & Vite.EnvironmentModuleNode
+          );
+        }
+      }
     );
-    if (mod) {
-      viteDevServer.moduleGraph.invalidateModule(mod);
-    }
   });
 };
 

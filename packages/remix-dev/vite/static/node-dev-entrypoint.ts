@@ -1,15 +1,12 @@
 import { createRequestHandler } from "@remix-run/server-runtime";
-import {
-    type ServerBuild,
-} from "@remix-run/server-runtime";
+import { type ServerBuild } from "@remix-run/server-runtime";
 
-// @ts-ignore
-const build = await import("virtual:remix/server-build") as ServerBuild;
+export default async function nodeHandler(req: Request): Promise<Response> {
+  // @ts-ignore
+  let build = (await import("virtual:remix/server-build")) as ServerBuild;
 
-const handler = createRequestHandler(build, "development");
+  let handler = createRequestHandler(build, "development");
 
-let loadContext = {};
-
-export default function nodeHandler(req: Request): Promise<Response> {
-    return handler(req, loadContext);
+  let loadContext = {};
+  return handler(req, loadContext);
 }
